@@ -1,0 +1,6 @@
+{
+  "name": "BeamDrop",
+  "description": "Direct browser-to-browser peer-to-peer file sharing using 4-digit codes, QR codes, and shortlinks with zero server storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
