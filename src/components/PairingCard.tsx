@@ -19,7 +19,8 @@ import {
   Zap 
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { ConnectionState, HtmlPreviewSession } from '../types';
+import { ConnectionLog, ConnectionState, HtmlPreviewSession } from '../types';
+import { ConnectionLogsCard } from './ConnectionLogsCard';
 
 interface PairingCardProps {
   roomCode: string;
@@ -31,6 +32,8 @@ interface PairingCardProps {
   onSelectHtmlFile?: (file: File) => void;
   activeHtmlSession?: HtmlPreviewSession | null;
   onOpenActiveHtml?: () => void;
+  logs?: ConnectionLog[];
+  onClearLogs?: () => void;
 }
 
 export const PairingCard: React.FC<PairingCardProps> = ({
@@ -43,6 +46,8 @@ export const PairingCard: React.FC<PairingCardProps> = ({
   onSelectHtmlFile,
   activeHtmlSession,
   onOpenActiveHtml,
+  logs = [],
+  onClearLogs,
 }) => {
   const [mode, setMode] = useState<'host' | 'join'>('host');
   const [digits, setDigits] = useState(['', '', '', '']);
@@ -358,6 +363,18 @@ export const PairingCard: React.FC<PairingCardProps> = ({
         </div>
       )}
 
+      {/* Connection & Signaling Activity Log (Real-time connection requests from client) */}
+      <div className="mt-6">
+        <ConnectionLogsCard
+          logs={logs}
+          connectionState={connectionState}
+          roomCode={roomCode}
+          isHost={mode === 'host'}
+          onClearLogs={onClearLogs}
+          onRefreshSignaling={onHostNewCode}
+        />
+      </div>
+
       {/* HTML File Preview & Quick Share Dropper */}
       <div 
         id="html-quick-share-card"
@@ -374,7 +391,7 @@ export const PairingCard: React.FC<PairingCardProps> = ({
             }
           }
         }}
-        className={`bg-white border-2 border-dashed rounded-2xl p-5 transition-all shadow-xs ${
+        className={`mt-6 bg-white border-2 border-dashed rounded-2xl p-5 transition-all shadow-xs ${
           isDraggingHtml 
             ? 'border-orange-500 bg-orange-50/60 scale-[1.01]' 
             : 'border-slate-200 hover:border-orange-300'
@@ -438,7 +455,7 @@ export const PairingCard: React.FC<PairingCardProps> = ({
       </div>
 
       {/* Cross-device help helper */}
-      <div className="mt-5 grid grid-cols-2 gap-3 text-center">
+      <div className="mt-6 grid grid-cols-2 gap-3 text-center">
         <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-center gap-2 text-xs text-slate-600 shadow-xs">
           <Smartphone className="w-4 h-4 text-blue-600" />
           <span>Mobile Phone / Tablet</span>

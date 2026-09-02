@@ -1,5 +1,5 @@
 import Peer, { DataConnection } from 'peerjs';
-import { ConnectionState, FileTransferItem, HtmlPreviewSession, PeerDevice, ProtocolMessage, TextSnippet } from '../types';
+import { ConnectionLog, ConnectionState, FileTransferItem, HtmlPreviewSession, PeerDevice, ProtocolMessage, TextSnippet } from '../types';
 import { getDeviceInfo } from './deviceInfo';
 import { extractHtmlTitle } from './formatters';
 import { playConnectSound, playNotificationSound, playTransferCompleteSound } from './soundEffects';
@@ -11,11 +11,23 @@ export interface WebRTCServiceEvents {
   onTextReceived: (snippet: TextSnippet) => void;
   onHtmlPresented?: (session: HtmlPreviewSession) => void;
   onCodeAssigned?: (code: string) => void;
+  onLog?: (log: ConnectionLog) => void;
   onError: (error: string) => void;
 }
 
 const CHUNK_SIZE = 32 * 1024; // 32 KB per chunk for optimal WebRTC reliability
 const BUFFER_HIGH_THRESHOLD = 512 * 1024; // 512 KB backpressure threshold
+
+// High-reliability multi-region STUN servers for NAT traversal
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+];
 
 export class WebRTCService {
   private peer: Peer | null = null;
@@ -31,9 +43,33 @@ export class WebRTCService {
   private lastPingTimestamp: number = 0;
   private isDestroyed: boolean = false;
   private activeHtmlSession: HtmlPreviewSession | null = null;
+  private logs: ConnectionLog[] = [];
+  private connectionTimeoutTimer: number | null = null;
 
   constructor(events: WebRTCServiceEvents) {
     this.events = events;
+  }
+
+  public getLogs(): ConnectionLog[] {
+    return [...this.logs];
+  }
+
+  public clearLogs(): void {
+    this.logs = [];
+  }
+
+  public log(level: ConnectionLog['level'], message: string, details?: string) {
+    const newLog: ConnectionLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: Date.now(),
+      level,
+      message,
+      details,
+    };
+    this.logs = [newLog, ...this.logs].slice(0, 100);
+    if (this.events.onLog) {
+      this.events.onLog(newLog);
+    }
   }
 
   public getRoomCode(): string {
@@ -72,6 +108,7 @@ export class WebRTCService {
     const code = preferredCode || Math.floor(1000 + Math.random() * 9000).toString();
     this.roomCode = code;
     this.setConnectionState('initializing', `Registering 4-digit code: ${code}...`);
+    this.log('info', `Initializing Host mode with room code [${code}]`, 'Connecting to public STUN & PeerJS signaling cloud');
 
     const peerId = `p2pdrop-${code}-host`;
 
@@ -79,14 +116,9 @@ export class WebRTCService {
       try {
         const peer = new Peer(peerId, {
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-              { urls: 'stun:stun2.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
+            iceServers: ICE_SERVERS,
           },
-          debug: 0,
+          debug: 1,
         });
 
         this.peer = peer;
@@ -94,6 +126,7 @@ export class WebRTCService {
         peer.on('open', (id) => {
           if (this.isDestroyed) return;
           this.setConnectionState('ready', `Space ready! Share code ${code} to connect.`);
+          this.log('success', `Signaling registered as Host: ${id}`, `Listening for peer requests on room code: ${code}`);
           if (this.events.onCodeAssigned) {
             this.events.onCodeAssigned(code);
           }
@@ -101,8 +134,9 @@ export class WebRTCService {
         });
 
         peer.on('connection', (conn) => {
+          this.log('request', `Incoming connection request from peer: ${conn.peer}`, `Initiating WebRTC handshake and DataChannel exchange`);
           if (this.connection) {
-            // Already connected to one peer, close previous or allow reconnect
+            this.log('warning', `Replacing existing connection with new peer request: ${conn.peer}`);
             try { this.connection.close(); } catch {}
           }
           this.setupConnection(conn);
@@ -110,8 +144,10 @@ export class WebRTCService {
 
         peer.on('error', (err) => {
           if (this.isDestroyed) return;
+          this.log('error', `Signaling error: ${err.type || 'error'}`, err.message);
           // If code is already taken, generate another 4-digit code automatically
           if (err.type === 'unavailable-id') {
+            this.log('warning', `Code ${code} is in use, generating alternative 4-digit code...`);
             const nextCode = Math.floor(1000 + Math.random() * 9000).toString();
             this.hostRoom(nextCode).then(resolve).catch(reject);
             return;
@@ -122,12 +158,14 @@ export class WebRTCService {
         });
 
         peer.on('disconnected', () => {
+          this.log('warning', 'Signaling server disconnected', 'Direct P2P session remains active if already connected');
           if (this.connectionState === 'connected') {
             this.setConnectionState('disconnected', 'Signaling disconnected (P2P might still be active)');
           }
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to create host';
+        this.log('error', 'Failed to initialize Host peer', msg);
         this.setConnectionState('error', msg);
         reject(err);
       }
@@ -144,6 +182,7 @@ export class WebRTCService {
     this.roomCode = code.trim();
 
     this.setConnectionState('connecting', `Searching for peer with code ${this.roomCode}...`);
+    this.log('info', `Connecting to Host with room code [${this.roomCode}]`, 'Initiating signaling exchange');
 
     const clientId = `p2pdrop-${this.roomCode}-client-${Math.random().toString(36).substring(2, 7)}`;
     const hostPeerId = `p2pdrop-${this.roomCode}-host`;
@@ -152,23 +191,21 @@ export class WebRTCService {
       try {
         const peer = new Peer(clientId, {
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-              { urls: 'stun:stun2.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
+            iceServers: ICE_SERVERS,
           },
-          debug: 0,
+          debug: 1,
         });
 
         this.peer = peer;
 
         peer.on('open', () => {
           if (this.isDestroyed) return;
+          this.log('info', `Client signaling registered: ${clientId}`, `Sending connection request to host: ${hostPeerId}`);
+          
           const conn = peer.connect(hostPeerId, {
             reliable: true,
           });
+
           this.setupConnection(conn);
           resolve();
         });
@@ -176,14 +213,16 @@ export class WebRTCService {
         peer.on('error', (err) => {
           if (this.isDestroyed) return;
           const errorMsg = err.type === 'peer-unavailable' 
-            ? `Room ${code} not found. Please check the 4-digit code on the other device.`
+            ? `Room ${code} not found. Please verify the 4-digit code on the Host device.`
             : (err.message || 'Connection error');
+          this.log('error', `Connection error: ${err.type}`, errorMsg);
           this.setConnectionState('error', errorMsg);
           this.events.onError(errorMsg);
           reject(new Error(errorMsg));
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to join room';
+        this.log('error', 'Failed to join space', msg);
         this.setConnectionState('error', msg);
         reject(err);
       }
@@ -191,15 +230,57 @@ export class WebRTCService {
   }
 
   /**
-   * Configure the established DataConnection
+   * Configure the established DataConnection and attach WebRTC lifecycle listeners
    */
   private setupConnection(conn: DataConnection) {
     this.connection = conn;
     this.setConnectionState('connecting', 'Establishing secure P2P DataChannel...');
+    this.log('info', `Negotiating WebRTC DataChannel with ${conn.peer}...`);
+
+    // Set connection timeout watchdog
+    if (this.connectionTimeoutTimer) {
+      window.clearTimeout(this.connectionTimeoutTimer);
+    }
+    this.connectionTimeoutTimer = window.setTimeout(() => {
+      if (this.connectionState === 'connecting') {
+        this.log('warning', 'Connection is taking longer than expected', 'Checking STUN server reachability and NAT traversal.');
+      }
+    }, 10000);
+
+    // Attach to underlying RTCPeerConnection if available
+    const attachPeerConnectionListeners = () => {
+      const pc = (conn as any).peerConnection as RTCPeerConnection | undefined;
+      if (pc) {
+        pc.oniceconnectionstatechange = () => {
+          this.log('info', `ICE Connection State: ${pc.iceConnectionState}`, `NAT traversal status`);
+          if (pc.iceConnectionState === 'failed') {
+            this.log('error', 'ICE Negotiation Failed', 'Direct peer-to-peer route could not be established. Both devices may be behind symmetric NAT.');
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          this.log('info', `WebRTC State: ${pc.connectionState}`);
+        };
+
+        pc.onsignalingstatechange = () => {
+          this.log('info', `Signaling State: ${pc.signalingState}`);
+        };
+      }
+    };
+
+    attachPeerConnectionListeners();
+    // Also try attaching slightly later if RTCPeerConnection initializes asynchronously
+    setTimeout(attachPeerConnectionListeners, 100);
 
     conn.on('open', () => {
       if (this.isDestroyed) return;
+      if (this.connectionTimeoutTimer) {
+        window.clearTimeout(this.connectionTimeoutTimer);
+        this.connectionTimeoutTimer = null;
+      }
+
       this.setConnectionState('connected', 'Secure P2P Connection Established');
+      this.log('success', `Direct DataChannel open with peer: ${conn.peer}`, 'P2P pipeline ready for file streaming and live previews');
       playConnectSound();
 
       // Send device handshake
@@ -213,6 +294,7 @@ export class WebRTCService {
         },
       };
       this.sendMessage(handshakeMsg);
+      this.log('info', `Sent device handshake: "${myInfo.name}" (${myInfo.browser} on ${myInfo.os})`);
 
       // Start RTT ping heartbeat
       this.startPingLoop();
@@ -227,6 +309,7 @@ export class WebRTCService {
           fileSize: this.activeHtmlSession.fileSize,
           timestamp: Date.now(),
         });
+        this.log('info', `Broadcasting active HTML session: ${this.activeHtmlSession.fileName}`);
       } else if (!this.isHost) {
         // As client, request active HTML if host is presenting one
         this.sendMessage({
@@ -241,12 +324,14 @@ export class WebRTCService {
 
     conn.on('close', () => {
       this.stopPingLoop();
+      this.log('warning', `Peer connection closed: ${conn.peer}`);
       this.peerDevice = null;
       this.events.onPeerDeviceChange(null);
       this.setConnectionState('disconnected', 'Peer disconnected');
     });
 
     conn.on('error', (err) => {
+      this.log('error', `DataChannel error on ${conn.peer}`, err.message);
       this.setConnectionState('error', `Connection error: ${err.message || 'DataChannel failure'}`);
       this.events.onError(err.message || 'DataChannel error');
     });

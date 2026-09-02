@@ -55,6 +55,14 @@ export interface HtmlPreviewSession {
   title?: string;
 }
 
+export interface ConnectionLog {
+  id: string;
+  timestamp: number;
+  level: 'info' | 'success' | 'warning' | 'error' | 'request';
+  message: string;
+  details?: string;
+}
+
 export type ProtocolMessage =
   | {
       type: 'handshake';

@@ -13,7 +13,7 @@ import {
   X, 
   Zap 
 } from 'lucide-react';
-import { ConnectionState, FileTransferItem, HtmlPreviewSession, PeerDevice, TextSnippet } from './types';
+import { ConnectionLog, ConnectionState, FileTransferItem, HtmlPreviewSession, PeerDevice, TextSnippet } from './types';
 import { WebRTCService } from './lib/webrtcService';
 import { isSoundEnabled, setSoundEnabled } from './lib/soundEffects';
 import { extractHtmlTitle, isHtmlFile } from './lib/formatters';
@@ -38,6 +38,7 @@ export default function App() {
   const [isQRModalOpen, setIsQRModalOpen] = useState<boolean>(false);
   const [previewItem, setPreviewItem] = useState<FileTransferItem | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [logs, setLogs] = useState<ConnectionLog[]>([]);
 
   // Active HTML Live Preview Session
   const [activeHtmlSession, setActiveHtmlSession] = useState<HtmlPreviewSession | null>(null);
@@ -106,6 +107,9 @@ export default function App() {
       onHtmlPresented: handleHtmlPresented,
       onCodeAssigned: (code) => {
         setRoomCode(code);
+      },
+      onLog: (newLog) => {
+        setLogs((prev) => [newLog, ...prev].slice(0, 100));
       },
       onError: (err) => {
         setErrorMessage(err);
@@ -394,6 +398,8 @@ export default function App() {
               onSelectHtmlFile={handleSelectHtmlFile}
               activeHtmlSession={activeHtmlSession}
               onOpenActiveHtml={() => setIsHtmlModalOpen(true)}
+              logs={logs}
+              onClearLogs={() => setLogs([])}
             />
 
             {/* Explanatory security & zero-backend note */}
