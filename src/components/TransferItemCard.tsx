@@ -14,12 +14,13 @@ import {
   FileImage, 
   FileText, 
   FileVideo, 
+  Globe, 
   Loader2, 
   X, 
   Zap 
 } from 'lucide-react';
 import { FileTransferItem } from '../types';
-import { formatBytes, formatDuration, formatSpeed, getFileIconCategory } from '../lib/formatters';
+import { formatBytes, formatDuration, formatSpeed, getFileIconCategory, isHtmlFile } from '../lib/formatters';
 
 interface TransferItemCardProps {
   item: FileTransferItem;
@@ -35,9 +36,12 @@ export const TransferItemCard: React.FC<TransferItemCardProps> = ({
   onDownload,
 }) => {
   const category = getFileIconCategory(item.type, item.name);
+  const isHtml = isHtmlFile(item.type, item.name);
 
   const renderIcon = () => {
     switch (category) {
+      case 'html':
+        return <Globe className="w-6 h-6 text-orange-500" />;
       case 'image':
         return <FileImage className="w-6 h-6 text-pink-400" />;
       case 'video':
@@ -70,7 +74,8 @@ export const TransferItemCard: React.FC<TransferItemCardProps> = ({
     }
   };
 
-  const canPreview = category === 'image' || category === 'video' || category === 'audio' || category === 'document' || category === 'code';
+  const canPreview = category === 'html' || category === 'image' || category === 'video' || category === 'audio' || category === 'document' || category === 'code';
+  const hasFileContent = !!(item.file || item.blob || item.downloadUrl);
 
   return (
     <div
@@ -80,7 +85,11 @@ export const TransferItemCard: React.FC<TransferItemCardProps> = ({
       <div className="flex items-start justify-between gap-3">
         {/* Left: Icon & File Meta */}
         <div className="flex items-start gap-3.5 min-w-0 flex-1">
-          <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${
+            isHtml 
+              ? 'bg-orange-50 border-orange-200' 
+              : 'bg-slate-50 border-slate-200'
+          }`}>
             {renderIcon()}
           </div>
           <div className="min-w-0 flex-1">
@@ -88,6 +97,12 @@ export const TransferItemCard: React.FC<TransferItemCardProps> = ({
               <h4 className="text-sm font-semibold text-slate-900 truncate max-w-[240px] sm:max-w-xs md:max-w-md" title={item.name}>
                 {item.name}
               </h4>
+              {/* HTML Badge */}
+              {isHtml && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200">
+                  <Zap className="w-2.5 h-2.5 text-orange-600" /> HTML5 Live
+                </span>
+              )}
               {/* Transfer direction pill */}
               <span
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
@@ -163,28 +178,42 @@ export const TransferItemCard: React.FC<TransferItemCardProps> = ({
             </button>
           )}
 
+          {/* HTML Specific Preview Button */}
+          {isHtml && hasFileContent && onPreview && (
+            <button
+              id={`live-preview-html-${item.id}`}
+              onClick={() => onPreview(item)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-semibold border border-orange-200 transition shadow-2xs cursor-pointer"
+              title="Open Live Interactive HTML Preview"
+            >
+              <Globe className="w-3.5 h-3.5 text-orange-600" />
+              <span>Live Preview</span>
+            </button>
+          )}
+
+          {/* Regular preview for other media/documents */}
+          {!isHtml && canPreview && hasFileContent && onPreview && (
+            <button
+              id={`preview-file-${item.id}`}
+              onClick={() => onPreview(item)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition cursor-pointer"
+              title="Preview in browser"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Preview</span>
+            </button>
+          )}
+
+          {/* Save / Download button for completed received transfers */}
           {item.status === 'completed' && !item.isSender && (
-            <>
-              {canPreview && onPreview && (
-                <button
-                  id={`preview-file-${item.id}`}
-                  onClick={() => onPreview(item)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition cursor-pointer"
-                  title="Preview in browser"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Preview</span>
-                </button>
-              )}
-              <button
-                id={`download-file-${item.id}`}
-                onClick={handleDirectDownload}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Save File</span>
-              </button>
-            </>
+            <button
+              id={`download-file-${item.id}`}
+              onClick={handleDirectDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Save</span>
+            </button>
           )}
         </div>
       </div>

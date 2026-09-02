@@ -1,29 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { Download, ExternalLink, X } from 'lucide-react';
+import { Download, ExternalLink, Globe, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FileTransferItem } from '../types';
-import { formatBytes, getFileIconCategory } from '../lib/formatters';
+import { formatBytes, getFileIconCategory, isHtmlFile } from '../lib/formatters';
 
 interface FilePreviewModalProps {
   item: FileTransferItem | null;
   onClose: () => void;
+  onOpenHtmlSandbox?: (item: FileTransferItem) => void;
 }
 
-export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ item, onClose }) => {
+export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ item, onClose, onOpenHtmlSandbox }) => {
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loadingText, setLoadingText] = useState(false);
 
+  const isHtml = item ? isHtmlFile(item.type, item.name) : false;
   const category = item ? getFileIconCategory(item.type, item.name) : 'other';
 
   useEffect(() => {
-    if (!item || !item.blob) {
+    if (!item) {
       setTextContent(null);
       return;
     }
 
-    if (category === 'document' || category === 'code') {
+    const source = item.blob || item.file;
+    if (!source) {
+      setTextContent(null);
+      return;
+    }
+
+    if (category === 'html' || category === 'document' || category === 'code') {
       // Check if it's text/code readable
-      if (item.type.includes('text') || item.type.includes('json') || item.type.includes('javascript') || item.name.endsWith('.txt') || item.name.endsWith('.md') || item.name.endsWith('.json') || item.name.endsWith('.csv')) {
+      if (isHtml || item.type.includes('text') || item.type.includes('json') || item.type.includes('javascript') || item.name.endsWith('.txt') || item.name.endsWith('.md') || item.name.endsWith('.json') || item.name.endsWith('.csv')) {
         setLoadingText(true);
         const reader = new FileReader();
         reader.onload = () => {
@@ -34,14 +42,14 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ item, onClos
           setTextContent(null);
           setLoadingText(false);
         };
-        reader.readAsText(item.blob.slice(0, 100000)); // Read first 100KB for preview
+        reader.readAsText(source.slice(0, 100000)); // Read first 100KB for preview
       } else {
         setTextContent(null);
       }
     } else {
       setTextContent(null);
     }
-  }, [item, category]);
+  }, [item, category, isHtml]);
 
   if (!item) return null;
 
@@ -77,6 +85,16 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ item, onClos
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {isHtml && onOpenHtmlSandbox && (
+                <button
+                  id="open-interactive-sandbox-btn"
+                  onClick={() => onOpenHtmlSandbox(item)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-semibold border border-orange-200 shadow-2xs transition cursor-pointer"
+                >
+                  <Globe className="w-3.5 h-3.5 text-orange-600" />
+                  <span>Live Sandbox Mode</span>
+                </button>
+              )}
               <button
                 id="preview-download-btn"
                 onClick={handleDownload}
@@ -124,15 +142,38 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ item, onClos
               </div>
             )}
 
+            {/* HTML Sandbox embed in regular modal if not opening separate modal */}
+            {isHtml && item.downloadUrl && (
+              <div className="w-full h-[60vh] bg-white rounded-xl border border-slate-300 overflow-hidden shadow-xs flex flex-col">
+                <div className="bg-slate-100 border-b border-slate-200 px-3 py-1.5 flex items-center justify-between text-xs text-slate-600">
+                  <span className="font-mono text-[11px] text-slate-500">Live HTML Sandbox</span>
+                  {onOpenHtmlSandbox && (
+                    <button
+                      onClick={() => onOpenHtmlSandbox(item)}
+                      className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-semibold"
+                    >
+                      <Zap className="w-3 h-3" /> Fullscreen Viewport Mode
+                    </button>
+                  )}
+                </div>
+                <iframe
+                  src={item.downloadUrl}
+                  title={item.name}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  className="w-full h-full border-0 flex-1"
+                />
+              </div>
+            )}
+
             {/* Text Preview */}
-            {(category === 'document' || category === 'code') && textContent !== null && (
+            {!isHtml && (category === 'document' || category === 'code') && textContent !== null && (
               <pre className="w-full max-h-[60vh] p-4 bg-white border border-slate-200 rounded-xl font-mono text-xs text-slate-800 overflow-auto whitespace-pre-wrap">
                 {textContent}
               </pre>
             )}
 
             {/* Fallback for generic binary/archive files */}
-            {category !== 'image' && category !== 'video' && category !== 'audio' && textContent === null && (
+            {category !== 'image' && category !== 'video' && category !== 'audio' && !isHtml && textContent === null && (
               <div className="text-center py-12">
                 <p className="text-sm text-slate-500 mb-4">
                   In-browser preview not available for this file type.

@@ -45,6 +45,16 @@ export interface TextSnippet {
   sender: 'me' | 'peer';
 }
 
+export interface HtmlPreviewSession {
+  id: string;
+  fileName: string;
+  htmlContent: string;
+  fileSize: number;
+  source: 'local' | 'peer';
+  timestamp: number;
+  title?: string;
+}
+
 export type ProtocolMessage =
   | {
       type: 'handshake';
@@ -90,4 +100,15 @@ export type ProtocolMessage =
       id: string;
       text: string;
       timestamp: number;
+    }
+  | {
+      type: 'present-html';
+      id: string;
+      fileName: string;
+      htmlContent: string;
+      fileSize: number;
+      timestamp: number;
+    }
+  | {
+      type: 'request-active-html';
     };

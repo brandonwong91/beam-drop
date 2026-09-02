@@ -1,6 +1,7 @@
 import Peer, { DataConnection } from 'peerjs';
-import { ConnectionState, FileTransferItem, PeerDevice, ProtocolMessage, TextSnippet } from '../types';
+import { ConnectionState, FileTransferItem, HtmlPreviewSession, PeerDevice, ProtocolMessage, TextSnippet } from '../types';
 import { getDeviceInfo } from './deviceInfo';
+import { extractHtmlTitle } from './formatters';
 import { playConnectSound, playNotificationSound, playTransferCompleteSound } from './soundEffects';
 
 export interface WebRTCServiceEvents {
@@ -8,6 +9,7 @@ export interface WebRTCServiceEvents {
   onPeerDeviceChange: (device: PeerDevice | null) => void;
   onTransferUpdate: (transfer: FileTransferItem) => void;
   onTextReceived: (snippet: TextSnippet) => void;
+  onHtmlPresented?: (session: HtmlPreviewSession) => void;
   onCodeAssigned?: (code: string) => void;
   onError: (error: string) => void;
 }
@@ -28,6 +30,7 @@ export class WebRTCService {
   private pingInterval: number | null = null;
   private lastPingTimestamp: number = 0;
   private isDestroyed: boolean = false;
+  private activeHtmlSession: HtmlPreviewSession | null = null;
 
   constructor(events: WebRTCServiceEvents) {
     this.events = events;
@@ -43,6 +46,14 @@ export class WebRTCService {
 
   public getConnectionState(): ConnectionState {
     return this.connectionState;
+  }
+
+  public getActiveHtmlSession(): HtmlPreviewSession | null {
+    return this.activeHtmlSession;
+  }
+
+  public setActiveHtmlSession(session: HtmlPreviewSession | null) {
+    this.activeHtmlSession = session;
   }
 
   private setConnectionState(state: ConnectionState, message?: string) {
@@ -205,6 +216,23 @@ export class WebRTCService {
 
       // Start RTT ping heartbeat
       this.startPingLoop();
+
+      // If we have an active HTML preview session, present it to the peer
+      if (this.activeHtmlSession) {
+        this.sendMessage({
+          type: 'present-html',
+          id: this.activeHtmlSession.id,
+          fileName: this.activeHtmlSession.fileName,
+          htmlContent: this.activeHtmlSession.htmlContent,
+          fileSize: this.activeHtmlSession.fileSize,
+          timestamp: Date.now(),
+        });
+      } else if (!this.isHost) {
+        // As client, request active HTML if host is presenting one
+        this.sendMessage({
+          type: 'request-active-html',
+        });
+      }
     });
 
     conn.on('data', (data) => {
@@ -407,6 +435,38 @@ export class WebRTCService {
           break;
         }
 
+        case 'present-html': {
+          playNotificationSound();
+          const session: HtmlPreviewSession = {
+            id: msg.id,
+            fileName: msg.fileName,
+            htmlContent: msg.htmlContent,
+            fileSize: msg.fileSize,
+            source: 'peer',
+            timestamp: msg.timestamp,
+            title: extractHtmlTitle(msg.htmlContent) || undefined,
+          };
+          this.activeHtmlSession = session;
+          if (this.events.onHtmlPresented) {
+            this.events.onHtmlPresented(session);
+          }
+          break;
+        }
+
+        case 'request-active-html': {
+          if (this.activeHtmlSession) {
+            this.sendMessage({
+              type: 'present-html',
+              id: this.activeHtmlSession.id,
+              fileName: this.activeHtmlSession.fileName,
+              htmlContent: this.activeHtmlSession.htmlContent,
+              fileSize: this.activeHtmlSession.fileSize,
+              timestamp: this.activeHtmlSession.timestamp,
+            });
+          }
+          break;
+        }
+
         case 'file-cancel': {
           const receiver = this.receivingChunks.get(msg.id);
           if (receiver) {
@@ -598,6 +658,35 @@ export class WebRTCService {
       timestamp: snippet.timestamp,
     });
     return snippet;
+  }
+
+  /**
+   * Broadcast/Present an HTML preview to the connected peer
+   */
+  public presentHtml(fileName: string, htmlContent: string, fileSize?: number): HtmlPreviewSession {
+    const size = fileSize || new Blob([htmlContent]).size;
+    const session: HtmlPreviewSession = {
+      id: `html-session-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      fileName,
+      htmlContent,
+      fileSize: size,
+      source: 'local',
+      timestamp: Date.now(),
+      title: extractHtmlTitle(htmlContent) || undefined,
+    };
+
+    this.activeHtmlSession = session;
+
+    this.sendMessage({
+      type: 'present-html',
+      id: session.id,
+      fileName: session.fileName,
+      htmlContent: session.htmlContent,
+      fileSize: session.fileSize,
+      timestamp: session.timestamp,
+    });
+
+    return session;
   }
 
   public cleanup() {

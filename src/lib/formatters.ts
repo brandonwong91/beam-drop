@@ -27,9 +27,26 @@ export function generate4DigitCode(): string {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
-export function getFileIconCategory(mimeType: string, filename: string): 'image' | 'video' | 'audio' | 'document' | 'archive' | 'code' | 'other' {
+export function isHtmlFile(mimeType: string, filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  return ext === 'html' || ext === 'htm' || mimeType.includes('text/html');
+}
+
+export function extractHtmlTitle(html: string): string | null {
+  try {
+    const match = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getFileIconCategory(mimeType: string, filename: string): 'image' | 'video' | 'audio' | 'document' | 'archive' | 'code' | 'html' | 'other' {
   const ext = filename.split('.').pop()?.toLowerCase() || '';
   
+  if (isHtmlFile(mimeType, filename)) {
+    return 'html';
+  }
   if (mimeType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif'].includes(ext)) {
     return 'image';
   }
@@ -45,7 +62,7 @@ export function getFileIconCategory(mimeType: string, filename: string): 'image'
   if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) {
     return 'archive';
   }
-  if (['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'json', 'py', 'java', 'c', 'cpp', 'rs', 'go', 'php'].includes(ext)) {
+  if (['js', 'ts', 'jsx', 'tsx', 'css', 'json', 'py', 'java', 'c', 'cpp', 'rs', 'go', 'php'].includes(ext)) {
     return 'code';
   }
   return 'other';

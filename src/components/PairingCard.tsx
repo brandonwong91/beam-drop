@@ -3,19 +3,23 @@ import {
   ArrowRight, 
   Check, 
   Copy, 
+  FileCode2, 
+  Globe, 
   KeyRound, 
+  Laptop, 
   Link as LinkIcon, 
   Loader2, 
   QrCode, 
   Radio, 
   RefreshCw, 
   Share2, 
-  Sparkles,
-  Smartphone,
-  Laptop
+  Smartphone, 
+  Sparkles, 
+  UploadCloud, 
+  Zap 
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { ConnectionState } from '../types';
+import { ConnectionState, HtmlPreviewSession } from '../types';
 
 interface PairingCardProps {
   roomCode: string;
@@ -24,6 +28,9 @@ interface PairingCardProps {
   onHostNewCode: () => void;
   onJoinCode: (code: string) => void;
   onOpenQRModal: () => void;
+  onSelectHtmlFile?: (file: File) => void;
+  activeHtmlSession?: HtmlPreviewSession | null;
+  onOpenActiveHtml?: () => void;
 }
 
 export const PairingCard: React.FC<PairingCardProps> = ({
@@ -33,11 +40,16 @@ export const PairingCard: React.FC<PairingCardProps> = ({
   onHostNewCode,
   onJoinCode,
   onOpenQRModal,
+  onSelectHtmlFile,
+  activeHtmlSession,
+  onOpenActiveHtml,
 }) => {
   const [mode, setMode] = useState<'host' | 'join'>('host');
   const [digits, setDigits] = useState(['', '', '', '']);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [isDraggingHtml, setIsDraggingHtml] = useState(false);
+  const htmlFileInputRef = useRef<HTMLInputElement>(null);
   const inputRefs = [
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -345,6 +357,85 @@ export const PairingCard: React.FC<PairingCardProps> = ({
           </div>
         </div>
       )}
+
+      {/* HTML File Preview & Quick Share Dropper */}
+      <div 
+        id="html-quick-share-card"
+        onDragEnter={(e) => { e.preventDefault(); setIsDraggingHtml(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setIsDraggingHtml(false); }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDraggingHtml(false);
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            if (onSelectHtmlFile) {
+              onSelectHtmlFile(file);
+            }
+          }
+        }}
+        className={`bg-white border-2 border-dashed rounded-2xl p-5 transition-all shadow-xs ${
+          isDraggingHtml 
+            ? 'border-orange-500 bg-orange-50/60 scale-[1.01]' 
+            : 'border-slate-200 hover:border-orange-300'
+        }`}
+      >
+        <input
+          ref={htmlFileInputRef}
+          type="file"
+          accept=".html,.htm,text/html"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files[0] && onSelectHtmlFile) {
+              onSelectHtmlFile(e.target.files[0]);
+              e.target.value = '';
+            }
+          }}
+        />
+
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 text-left">
+            <div className="w-11 h-11 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 shrink-0">
+              <Globe className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-slate-900">
+                  Interactive HTML Preview Mode
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200">
+                  <Zap className="w-2.5 h-2.5" /> Instant Render
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Drop any <code className="text-slate-700 font-mono">.html</code> file to preview it live in your browser and automatically broadcast it to anyone who connects.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {activeHtmlSession ? (
+              <button
+                id="view-active-html-btn"
+                onClick={onOpenActiveHtml}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Open &ldquo;{activeHtmlSession.fileName}&rdquo;</span>
+              </button>
+            ) : (
+              <button
+                id="select-html-file-btn"
+                onClick={() => htmlFileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-800 text-xs font-semibold border border-orange-200 transition cursor-pointer shadow-2xs"
+              >
+                <UploadCloud className="w-3.5 h-3.5 text-orange-600" />
+                <span>Drop or Select .html</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Cross-device help helper */}
       <div className="mt-5 grid grid-cols-2 gap-3 text-center">

@@ -119,11 +119,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 
       {/* Feature tags */}
       <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-600">
-        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-50 border border-slate-200 font-medium">
-          <Zap className="w-3 h-3 text-amber-500" /> Direct Stream (No Size Limit)
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-orange-50/80 border border-orange-200 text-orange-700 font-medium">
+          <Zap className="w-3 h-3 text-orange-600" /> HTML Live Interactive Preview
         </span>
         <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-50 border border-slate-200 font-medium">
           <Sparkles className="w-3 h-3 text-blue-600" /> End-to-End Encrypted
+        </span>
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-50 border border-slate-200 font-medium">
+          <Zap className="w-3 h-3 text-amber-500" /> Direct P2P Stream
         </span>
       </div>
     </div>

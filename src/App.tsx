@@ -3,17 +3,20 @@ import confetti from 'canvas-confetti';
 import { 
   AlertTriangle, 
   CheckCircle2, 
+  Globe, 
   HelpCircle, 
   Info, 
   Radio, 
   RefreshCw, 
   ShieldCheck, 
   Wifi, 
+  X, 
   Zap 
 } from 'lucide-react';
-import { ConnectionState, FileTransferItem, PeerDevice, TextSnippet } from './types';
+import { ConnectionState, FileTransferItem, HtmlPreviewSession, PeerDevice, TextSnippet } from './types';
 import { WebRTCService } from './lib/webrtcService';
 import { isSoundEnabled, setSoundEnabled } from './lib/soundEffects';
+import { extractHtmlTitle, isHtmlFile } from './lib/formatters';
 import { Header } from './components/Header';
 import { PairingCard } from './components/PairingCard';
 import { ConnectedDeviceBar } from './components/ConnectedDeviceBar';
@@ -22,6 +25,7 @@ import { TransferList } from './components/TransferList';
 import { QuickTextShare } from './components/QuickTextShare';
 import { QRModal } from './components/QRModal';
 import { FilePreviewModal } from './components/FilePreviewModal';
+import { HtmlPreviewModal } from './components/HtmlPreviewModal';
 
 export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('initializing');
@@ -34,6 +38,11 @@ export default function App() {
   const [isQRModalOpen, setIsQRModalOpen] = useState<boolean>(false);
   const [previewItem, setPreviewItem] = useState<FileTransferItem | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Active HTML Live Preview Session
+  const [activeHtmlSession, setActiveHtmlSession] = useState<HtmlPreviewSession | null>(null);
+  const [isHtmlModalOpen, setIsHtmlModalOpen] = useState<boolean>(false);
+  const [peerPresentedToast, setPeerPresentedToast] = useState<HtmlPreviewSession | null>(null);
 
   const webrtcServiceRef = useRef<WebRTCService | null>(null);
 
@@ -72,6 +81,12 @@ export default function App() {
     setSnippets((prev) => [snippet, ...prev]);
   }, []);
 
+  const handleHtmlPresented = useCallback((session: HtmlPreviewSession) => {
+    setActiveHtmlSession(session);
+    setPeerPresentedToast(session);
+    setIsHtmlModalOpen(true);
+  }, []);
+
   // Initialize service
   useEffect(() => {
     const service = new WebRTCService({
@@ -88,6 +103,7 @@ export default function App() {
       },
       onTransferUpdate: handleTransferUpdate,
       onTextReceived: handleTextReceived,
+      onHtmlPresented: handleHtmlPresented,
       onCodeAssigned: (code) => {
         setRoomCode(code);
       },
@@ -116,7 +132,7 @@ export default function App() {
     return () => {
       service.cleanup();
     };
-  }, [handleTransferUpdate, handleTextReceived]);
+  }, [handleTransferUpdate, handleTextReceived, handleHtmlPresented]);
 
   const handleHostNewCode = () => {
     if (webrtcServiceRef.current) {
@@ -143,17 +159,112 @@ export default function App() {
     }
   };
 
+  const handleSelectHtmlFile = async (file: File) => {
+    try {
+      const htmlText = await file.text();
+      const session: HtmlPreviewSession = {
+        id: `html-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        fileName: file.name,
+        htmlContent: htmlText,
+        fileSize: file.size,
+        source: 'local',
+        timestamp: Date.now(),
+        title: extractHtmlTitle(htmlText) || undefined,
+      };
+
+      setActiveHtmlSession(session);
+      setIsHtmlModalOpen(true);
+
+      if (webrtcServiceRef.current) {
+        webrtcServiceRef.current.setActiveHtmlSession(session);
+        if (connectionState === 'connected') {
+          webrtcServiceRef.current.presentHtml(file.name, htmlText, file.size);
+          // Also queue file transfer for peer to download
+          webrtcServiceRef.current.sendFile(file).catch(() => {});
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(`Failed to read HTML file: ${err.message || 'File error'}`);
+    }
+  };
+
+  const handleOpenHtmlSandboxFromTransfer = async (item: FileTransferItem) => {
+    const source = item.file || item.blob;
+    if (!source) return;
+
+    try {
+      let htmlText = '';
+      if (typeof source.text === 'function') {
+        htmlText = await source.text();
+      } else {
+        htmlText = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsText(source);
+        });
+      }
+
+      const session: HtmlPreviewSession = {
+        id: `html-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        fileName: item.name,
+        htmlContent: htmlText,
+        fileSize: item.size,
+        source: item.isSender ? 'local' : 'peer',
+        timestamp: Date.now(),
+        title: extractHtmlTitle(htmlText) || undefined,
+      };
+
+      setActiveHtmlSession(session);
+      setIsHtmlModalOpen(true);
+      if (previewItem) {
+        setPreviewItem(null);
+      }
+    } catch (err: any) {
+      setErrorMessage(`Failed to preview HTML: ${err.message || 'File read error'}`);
+    }
+  };
+
+  const handleBroadcastHtml = (session: HtmlPreviewSession) => {
+    if (webrtcServiceRef.current && connectionState === 'connected') {
+      webrtcServiceRef.current.presentHtml(session.fileName, session.htmlContent, session.fileSize);
+    }
+  };
+
   const handleFilesSelected = (files: File[]) => {
     if (!webrtcServiceRef.current || connectionState !== 'connected') {
+      // If user dropped an HTML file while not connected, open it in HTML preview mode
+      const htmlFile = files.find((f) => isHtmlFile(f.type, f.name));
+      if (htmlFile) {
+        handleSelectHtmlFile(htmlFile);
+        return;
+      }
       setErrorMessage('Please connect to a peer before sending files');
       return;
     }
 
+    // Check if any file is HTML to auto-present
+    const htmlFile = files.find((f) => isHtmlFile(f.type, f.name));
+    if (htmlFile) {
+      handleSelectHtmlFile(htmlFile);
+    }
+
     files.forEach((file) => {
-      webrtcServiceRef.current?.sendFile(file).catch((err) => {
-        setErrorMessage(`Failed to send ${file.name}: ${err.message}`);
-      });
+      // Don't send twice if already sent in handleSelectHtmlFile
+      if (!htmlFile || file !== htmlFile) {
+        webrtcServiceRef.current?.sendFile(file).catch((err) => {
+          setErrorMessage(`Failed to send ${file.name}: ${err.message}`);
+        });
+      }
     });
+  };
+
+  const handlePreviewTransfer = (item: FileTransferItem) => {
+    if (isHtmlFile(item.type, item.name)) {
+      handleOpenHtmlSandboxFromTransfer(item);
+    } else {
+      setPreviewItem(item);
+    }
   };
 
   const handleCancelTransfer = (id: string) => {
@@ -209,6 +320,67 @@ export default function App() {
           </div>
         )}
 
+        {/* Peer Live HTML Presentation Banner (When Peer presents HTML and user closed modal) */}
+        {peerPresentedToast && !isHtmlModalOpen && (
+          <div 
+            id="peer-html-presentation-banner"
+            className="mb-6 p-4 rounded-2xl bg-orange-50/90 border border-orange-200 text-orange-950 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm shadow-xs animate-fade-in"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <Globe className="w-5 h-5 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <span className="font-bold block text-slate-900">
+                  {peerDevice ? peerDevice.name : 'Peer'} is presenting an interactive HTML preview
+                </span>
+                <span className="text-xs text-slate-600 truncate block font-mono">
+                  &ldquo;{peerPresentedToast.fileName}&rdquo; {peerPresentedToast.title ? `(${peerPresentedToast.title})` : ''}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                id="open-peer-presented-html-btn"
+                onClick={() => setIsHtmlModalOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Open Live Interactive View</span>
+              </button>
+              <button
+                onClick={() => setPeerPresentedToast(null)}
+                className="p-1.5 text-orange-400 hover:text-orange-700 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Active HTML Preview Quick Launcher (When User loaded an HTML file) */}
+        {activeHtmlSession && !peerPresentedToast && !isHtmlModalOpen && (
+          <div 
+            id="active-html-banner"
+            className="mb-6 p-3.5 rounded-2xl bg-white border border-orange-200 text-slate-800 flex items-center justify-between gap-3 text-xs shadow-xs"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center shrink-0">
+                <Globe className="w-4 h-4" />
+              </div>
+              <span className="truncate font-medium">
+                Active HTML Preview: <strong className="font-semibold text-slate-900">{activeHtmlSession.fileName}</strong>
+              </span>
+            </div>
+            <button
+              onClick={() => setIsHtmlModalOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold border border-orange-200 transition cursor-pointer shrink-0"
+            >
+              <span>View Sandbox</span>
+            </button>
+          </div>
+        )}
+
         {/* View 1: Not connected -> Pairing Screen */}
         {!isConnected ? (
           <div className="space-y-6 animate-fade-in">
@@ -219,6 +391,9 @@ export default function App() {
               onHostNewCode={handleHostNewCode}
               onJoinCode={handleJoinCode}
               onOpenQRModal={() => setIsQRModalOpen(true)}
+              onSelectHtmlFile={handleSelectHtmlFile}
+              activeHtmlSession={activeHtmlSession}
+              onOpenActiveHtml={() => setIsHtmlModalOpen(true)}
             />
 
             {/* Explanatory security & zero-backend note */}
@@ -252,7 +427,7 @@ export default function App() {
             <TransferList
               transfers={transfers}
               onCancelTransfer={handleCancelTransfer}
-              onPreviewTransfer={(item) => setPreviewItem(item)}
+              onPreviewTransfer={handlePreviewTransfer}
               onClearCompleted={handleClearCompleted}
             />
 
@@ -285,10 +460,21 @@ export default function App() {
         shareUrl={shareUrl}
       />
 
-      {/* File Preview Modal */}
+      {/* Regular File Preview Modal (images, audio, video, text) */}
       <FilePreviewModal
         item={previewItem}
         onClose={() => setPreviewItem(null)}
+        onOpenHtmlSandbox={handleOpenHtmlSandboxFromTransfer}
+      />
+
+      {/* Dedicated Interactive HTML Preview Modal */}
+      <HtmlPreviewModal
+        session={activeHtmlSession}
+        isOpen={isHtmlModalOpen}
+        onClose={() => setIsHtmlModalOpen(false)}
+        isConnected={isConnected}
+        peerDevice={peerDevice}
+        onBroadcastToPeer={handleBroadcastHtml}
       />
     </div>
   );
