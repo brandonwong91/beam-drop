@@ -18,15 +18,11 @@ export interface WebRTCServiceEvents {
 const CHUNK_SIZE = 32 * 1024; // 32 KB per chunk for optimal WebRTC reliability
 const BUFFER_HIGH_THRESHOLD = 512 * 1024; // 512 KB backpressure threshold
 
-// High-reliability multi-region STUN servers for NAT traversal
+// Google STUN servers for NAT traversal & WebRTC candidate gathering
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:global.stun.twilio.com:3478' },
 ];
 
 export class WebRTCService {

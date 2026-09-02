@@ -138,8 +138,8 @@ export const ConnectionLogsCard: React.FC<ConnectionLogsCardProps> = ({
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-2.5">
               <Wifi className="w-4 h-4 text-slate-500 shrink-0" />
               <div className="min-w-0">
-                <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">STUN Multi-Cloud</span>
-                <span className="font-semibold text-slate-900 truncate block">Google & Twilio STUN</span>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">STUN Server</span>
+                <span className="font-semibold text-slate-900 truncate block">stun.l.google.com:19302</span>
               </div>
             </div>
 
